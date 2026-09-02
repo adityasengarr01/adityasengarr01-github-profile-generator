@@ -1,9 +1,26 @@
 export default async function handler(req, res) {
   const username = "adityasengarr01";
+  const token = process.env.GITHUB_TOKEN;
+
+  if (!token) {
+    res.status(500).send("GITHUB_TOKEN is missing");
+    return;
+  }
+
+  const esc = (value = "") =>
+    String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
 
   try {
-    // GitHub profile data
-    const githubResponse = await fetch(
+    // --------------------------------------------------
+    // 1. GET BASIC GITHUB PROFILE DATA
+    // --------------------------------------------------
+
+    const profileResponse = await fetch(
       `https://api.github.com/users/${username}`,
       {
         headers: {
@@ -13,284 +30,571 @@ export default async function handler(req, res) {
       }
     );
 
-    if (!githubResponse.ok) {
-      throw new Error("GitHub API failed");
+    if (!profileResponse.ok) {
+      throw new Error("GitHub profile API failed");
     }
 
-    const user = await githubResponse.json();
+    const user = await profileResponse.json();
 
-    // Your uploaded photo
+    // --------------------------------------------------
+    // 2. GET CONTRIBUTION DATA USING GITHUB GRAPHQL
+    // --------------------------------------------------
+
+    const today = new Date();
+    const oneYearAgo = new Date(today);
+
+    oneYearAgo.setFullYear(today.getFullYear() - 1);
+
+    const from = oneYearAgo.toISOString();
+    const to = today.toISOString();
+
+    const graphqlQuery = `
+      query($login: String!, $from: DateTime!, $to: DateTime!) {
+        user(login: $login) {
+          contributionsCollection(from: $from, to: $to) {
+            contributionCalendar {
+              totalContributions
+              weeks {
+                contributionDays {
+                  date
+                  contributionCount
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const graphqlResponse = await fetch(
+      "https://api.github.com/graphql",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "github-profile-generator"
+        },
+        body: JSON.stringify({
+          query: graphqlQuery,
+          variables: {
+            login: username,
+            from,
+            to
+          }
+        })
+      }
+    );
+
+    if (!graphqlResponse.ok) {
+      throw new Error("GitHub GraphQL request failed");
+    }
+
+    const graphqlData = await graphqlResponse.json();
+
+    if (graphqlData.errors) {
+      throw new Error(
+        graphqlData.errors.map((e) => e.message).join(", ")
+      );
+    }
+
+    const calendar =
+      graphqlData.data.user.contributionsCollection.contributionCalendar;
+
+    // --------------------------------------------------
+    // 3. PROCESS CONTRIBUTION DATA
+    // --------------------------------------------------
+
+    const weeks = calendar.weeks || [];
+
+    const contributionDays = weeks.flatMap(
+      (week) => week.contributionDays || []
+    );
+
+    const totalContributions = calendar.totalContributions || 0;
+
+    const activeDays = contributionDays.filter(
+      (day) => day.contributionCount > 0
+    ).length;
+
+    const weeklyTotals = weeks.map((week) =>
+      (week.contributionDays || []).reduce(
+        (sum, day) => sum + day.contributionCount,
+        0
+      )
+    );
+
+    const bestWeek =
+      weeklyTotals.length > 0
+        ? Math.max(...weeklyTotals)
+        : 0;
+
+    // --------------------------------------------------
+    // 4. CREATE SMALL ACTIVITY GRAPH
+    // --------------------------------------------------
+
+    const graphWidth = 520;
+    const graphHeight = 120;
+
+    const maxWeeklyContribution =
+      Math.max(...weeklyTotals, 1);
+
+    const graphPoints = weeklyTotals
+      .map((value, index) => {
+        const x =
+          (index / Math.max(weeklyTotals.length - 1, 1)) *
+          graphWidth;
+
+        const y =
+          graphHeight -
+          (value / maxWeeklyContribution) *
+            (graphHeight - 12);
+
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+
+    // --------------------------------------------------
+    // 5. YOUR PORTRAIT
+    // --------------------------------------------------
+
     const photoUrl =
       "https://raw.githubusercontent.com/adityasengarr01/adityasengarr01-github-profile-generator/main/ChatGPT%20Image%20Sep%202%2C%202026%2C%2003_11_20%20PM.png";
 
+    // --------------------------------------------------
+    // 6. SVG
+    // --------------------------------------------------
+
     const svg = `
 <svg
-  xmlns="http://www.w3.org/2000/svg"
   width="1200"
-  height="900"
-  viewBox="0 0 1200 900"
+  height="1050"
+  viewBox="0 0 1200 1050"
+  xmlns="http://www.w3.org/2000/svg"
 >
-  <rect width="1200" height="900" fill="#050505"/>
 
-  <!-- Top terminal line -->
+  <defs>
+
+    <linearGradient
+      id="terminalGradient"
+      x1="0"
+      y1="0"
+      x2="1"
+      y2="1"
+    >
+      <stop offset="0%" stop-color="#111111"/>
+      <stop offset="100%" stop-color="#050505"/>
+    </linearGradient>
+
+    <filter id="softGlow">
+      <feGaussianBlur
+        stdDeviation="3"
+        result="blur"
+      />
+
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+  </defs>
+
+  <!-- BACKGROUND -->
+
+  <rect
+    width="1200"
+    height="1050"
+    fill="#050505"
+  />
+
+  <rect
+    x="30"
+    y="30"
+    width="1140"
+    height="990"
+    rx="18"
+    fill="url(#terminalGradient)"
+    stroke="#242424"
+    stroke-width="2"
+  />
+
+  <!-- TERMINAL HEADER -->
+
+  <circle
+    cx="65"
+    cy="65"
+    r="8"
+    fill="#555"
+  />
+
+  <circle
+    cx="90"
+    cy="65"
+    r="8"
+    fill="#555"
+  />
+
+  <circle
+    cx="115"
+    cy="65"
+    r="8"
+    fill="#555"
+  />
+
   <text
-    x="60"
-    y="65"
-    fill="#8f8f8f"
-    font-family="monospace"
+    x="150"
+    y="72"
+    fill="#777"
     font-size="18"
+    font-family="monospace"
   >
-    adityasengarr01@github:~$
+    github-profile
+  </text>
+
+  <!-- COMMAND -->
+
+  <text
+    x="65"
+    y="125"
+    fill="#777"
+    font-size="18"
+    font-family="monospace"
+  >
+    $
   </text>
 
   <text
-    x="310"
-    y="65"
-    fill="#ffffff"
-    font-family="monospace"
+    x="88"
+    y="125"
+    fill="#f1f1f1"
     font-size="18"
+    font-family="monospace"
   >
     whoami
   </text>
 
-  <!-- Profile image -->
+  <!-- PORTRAIT -->
+
   <rect
-    x="60"
-    y="100"
+    x="65"
+    y="155"
     width="430"
     height="430"
-    rx="8"
-    fill="#111111"
+    rx="12"
+    fill="#090909"
+    stroke="#252525"
   />
 
   <image
     href="${photoUrl}"
-    x="60"
-    y="100"
-    width="430"
-    height="430"
-    preserveAspectRatio="xMidYMid slice"
+    x="75"
+    y="165"
+    width="410"
+    height="410"
+    preserveAspectRatio="xMidYMid meet"
   />
 
-  <!-- Name -->
+  <!-- NAME -->
+
   <text
-    x="540"
-    y="145"
-    fill="#ffffff"
-    font-family="monospace"
-    font-size="32"
-    font-weight="bold"
+    x="535"
+    y="195"
+    fill="#f5f5f5"
+    font-size="38"
+    font-weight="700"
+    font-family="Arial, sans-serif"
   >
-    Aditya Sengarr
+    ${esc(user.name || username)}
   </text>
 
   <text
-    x="540"
-    y="180"
-    fill="#777777"
+    x="535"
+    y="230"
+    fill="#777"
+    font-size="20"
     font-family="monospace"
-    font-size="17"
   >
-    @adityasengarr01
+    @${esc(username)}
   </text>
 
-  <!-- Stats -->
+  <line
+    x1="535"
+    y1="255"
+    x2="1110"
+    y2="255"
+    stroke="#292929"
+  />
+
+  <!-- PROFILE STATS -->
+
   <text
-    x="540"
-    y="240"
-    fill="#ffffff"
+    x="535"
+    y="300"
+    fill="#777"
+    font-size="16"
     font-family="monospace"
-    font-size="22"
   >
     repositories
   </text>
 
   <text
-    x="820"
-    y="240"
+    x="535"
+    y="330"
     fill="#ffffff"
+    font-size="28"
+    font-weight="700"
     font-family="monospace"
-    font-size="22"
   >
     ${user.public_repos}
   </text>
 
+
   <text
-    x="540"
-    y="285"
-    fill="#ffffff"
+    x="700"
+    y="300"
+    fill="#777"
+    font-size="16"
     font-family="monospace"
-    font-size="22"
   >
     followers
   </text>
 
   <text
-    x="820"
-    y="285"
+    x="700"
+    y="330"
     fill="#ffffff"
+    font-size="28"
+    font-weight="700"
     font-family="monospace"
-    font-size="22"
   >
     ${user.followers}
   </text>
 
+
   <text
-    x="540"
-    y="330"
-    fill="#ffffff"
+    x="865"
+    y="300"
+    fill="#777"
+    font-size="16"
     font-family="monospace"
-    font-size="22"
   >
     following
   </text>
 
   <text
-    x="820"
+    x="865"
     y="330"
     fill="#ffffff"
+    font-size="28"
+    font-weight="700"
     font-family="monospace"
-    font-size="22"
   >
     ${user.following}
   </text>
 
-  <!-- About -->
+  <!-- BIO -->
+
   <text
-    x="540"
-    y="405"
-    fill="#8f8f8f"
+    x="535"
+    y="390"
+    fill="#777"
+    font-size="16"
     font-family="monospace"
+  >
+    about
+  </text>
+
+  <text
+    x="535"
+    y="420"
+    fill="#eeeeee"
     font-size="18"
+    font-family="Arial, sans-serif"
   >
-    $ cat about.txt
+    ${esc(
+      user.bio ||
+      "Developer • Student • Building things on the internet"
+    )}
   </text>
 
-  <text
-    x="540"
-    y="440"
-    fill="#ffffff"
-    font-family="monospace"
-    font-size="17"
-  >
-    developer • student • builder
-  </text>
+  <!-- CONTRIBUTION SECTION -->
 
   <text
-    x="540"
-    y="470"
-    fill="#777777"
-    font-family="monospace"
-    font-size="15"
-  >
-    building things and learning every day.
-  </text>
-
-  <!-- Stack -->
-  <text
-    x="60"
-    y="600"
-    fill="#8f8f8f"
-    font-family="monospace"
-    font-size="18"
-  >
-    $ cat stack.txt
-  </text>
-
-  <text
-    x="60"
+    x="65"
     y="640"
-    fill="#ffffff"
-    font-family="monospace"
+    fill="#777"
     font-size="17"
-  >
-    Java   C++   JavaScript   HTML   CSS   Git
-  </text>
-
-  <!-- Projects -->
-  <text
-    x="60"
-    y="700"
-    fill="#8f8f8f"
     font-family="monospace"
-    font-size="18"
   >
-    $ ls projects/
+    $ git contributions --last-year
   </text>
 
   <text
-    x="60"
-    y="740"
-    fill="#ffffff"
-    font-family="monospace"
-    font-size="17"
+    x="65"
+    y="685"
+    fill="#f5f5f5"
+    font-size="30"
+    font-weight="700"
+    font-family="Arial, sans-serif"
   >
-    DSA
+    ${totalContributions} contributions in the last year
+  </text>
+
+  <!-- ACTIVE DAYS -->
+
+  <text
+    x="65"
+    y="730"
+    fill="#777"
+    font-size="16"
+    font-family="monospace"
+  >
+    active days
   </text>
 
   <text
-    x="180"
-    y="740"
+    x="65"
+    y="760"
     fill="#ffffff"
+    font-size="27"
+    font-weight="700"
     font-family="monospace"
-    font-size="17"
   >
-    Java-Chat-Application
+    ${activeDays}
   </text>
 
+  <!-- BEST WEEK -->
+
   <text
-    x="60"
-    y="775"
-    fill="#ffffff"
+    x="220"
+    y="730"
+    fill="#777"
+    font-size="16"
     font-family="monospace"
-    font-size="17"
   >
-    AI-Projects
+    best week
   </text>
 
   <text
     x="220"
-    y="775"
+    y="760"
     fill="#ffffff"
+    font-size="27"
+    font-weight="700"
     font-family="monospace"
-    font-size="17"
   >
-    TSP_Project
+    ${bestWeek}
   </text>
 
-  <!-- Footer -->
-  <text
-    x="60"
-    y="850"
-    fill="#555555"
-    font-family="monospace"
-    font-size="14"
+  <!-- GRAPH -->
+
+  <g
+    transform="translate(500 705)"
   >
-    generated dynamically • github.com/adityasengarr01
+
+    <polyline
+      points="${graphPoints}"
+      fill="none"
+      stroke="#eeeeee"
+      stroke-width="3"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      filter="url(#softGlow)"
+    />
+
+    <polyline
+      points="${graphPoints}"
+      fill="none"
+      stroke="#ffffff"
+      stroke-width="1"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+  </g>
+
+  <!-- STACK -->
+
+  <text
+    x="65"
+    y="835"
+    fill="#777"
+    font-size="16"
+    font-family="monospace"
+  >
+    stack
+  </text>
+
+  <text
+    x="65"
+    y="865"
+    fill="#eeeeee"
+    font-size="19"
+    font-family="monospace"
+  >
+    JavaScript • Java • C++ • HTML • CSS • Git
+  </text>
+
+  <!-- PROJECTS -->
+
+  <text
+    x="65"
+    y="915"
+    fill="#777"
+    font-size="16"
+    font-family="monospace"
+  >
+    projects
+  </text>
+
+  <text
+    x="65"
+    y="945"
+    fill="#eeeeee"
+    font-size="18"
+    font-family="monospace"
+  >
+    github-profile-generator
+  </text>
+
+  <!-- FOOTER -->
+
+  <text
+    x="65"
+    y="985"
+    fill="#555"
+    font-size="14"
+    font-family="monospace"
+  >
+    generated dynamically • ${new Date().getFullYear()}
   </text>
 
 </svg>
 `;
 
-    res.setHeader("Content-Type", "image/svg+xml");
+    // --------------------------------------------------
+    // 7. RETURN SVG
+    // --------------------------------------------------
+
+    res.setHeader(
+      "Content-Type",
+      "image/svg+xml; charset=utf-8"
+    );
+
     res.setHeader(
       "Cache-Control",
       "public, s-maxage=300, stale-while-revalidate=600"
     );
 
-    return res.status(200).send(svg);
+    res.status(200).send(svg);
 
   } catch (error) {
-    return res.status(500).send(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="800" height="200">
-        <rect width="100%" height="100%" fill="#050505"/>
-        <text x="30" y="100"
-          fill="white"
-          font-family="monospace"
-          font-size="20">
-          profile generator error
-        </text>
-      </svg>
-    `);
+
+    console.error(error);
+
+    res.status(500).send(
+      `GitHub profile generator error: ${esc(error.message)}`
+    );
   }
 }
